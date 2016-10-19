@@ -1,0 +1,11 @@
+#if !defined(DRGAGENT_RH)
+#define DRGAGENT_RH
+
+#define IID_DEFICON      1000
+
+#define IDMT_OPTIONS     WPMENUID_USER
+
+#define CLASS_NAME       "DRGAGENT"
+#define CLASS_TITLE      "DRGAGENT"
+
+#endif

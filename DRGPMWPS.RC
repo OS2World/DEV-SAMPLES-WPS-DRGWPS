@@ -1,0 +1,9 @@
+#include <os2.h>
+#include "drgpmwps.h"
+
+ICON ID_RESOURCES PROGRAM_ICON_FILENAME
+
+ACCELTABLE ID_RESOURCES
+{
+    VK_F3, IDM_EXIT, VIRTUALKEY
+}

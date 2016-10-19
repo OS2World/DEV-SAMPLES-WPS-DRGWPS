@@ -1,0 +1,179 @@
+DRGPMWPS.EXE is a sample program that demonstrates a mechanism for allowing
+OS/2 Drag/Drop facilities (aka Direct Manipulation) to work between a normal
+PM window and the WorkPlace Shell. Normally only WPS objects descended from the
+WPFileSystem class (any objects that are 'Drives-folder descendents') are able
+to convey enough information to normal PM programs to make Drag/Drop work
+correctly. This sample program shows a way around that limitation. It is by no
+means meant as the definitive way around this problem.
+
+First, what are the reasons why the other WPS objects don't communicate well
+with normal PM programs during Drag/Drop?
+
+Let's take the simplest example: Using the DRM_OS2FILE Rendering mechanism,
+Drag/Drop is brought down to the level of filenames. If an item is being dropped
+on a PM window, that PM window can look at the DRAGITEM structure provided on
+the drop and get the filename of the file being dropped. That's all it needs to
+complete the drop in most cases. If you drag a file from a WPFileSystem folder
+(let's say the config.sys icon from the C:\ folder opened from the Drives
+folder), and drop it onto a PM window, that PM window will be able to get
+C:\CONFIG.SYS as the file that's being dropped. That's what it would want.
+
+Now let's say you are dragging a Program Object (a WPS object descended from the
+WPProgram class). Let's say the Program Object represents the Lotus Freelance
+program (FLG.EXE) which is located in the C:\LOTUS directory. You would expect
+to be able to get the C:\LOTUS\FLG.EXE information when the program was dropped
+on your PM window, right? Wrong. The directory path for a Program Object is
+considered to be in the folder that contains it. The folder's location is in
+relation to d:\Desktop where d: is your boot drive. So if your Program Object is
+in the 'OS2Programs' folder and the Program title (the text under the icon) is
+'Lotus Freelance', the only directory information that you could get
+about the program would be 'd:\Desktop\OS2Programs\Lotus Freelance'. This
+doesn't do much for a normal PM program which needs access to the
+'C:\LOTUS\FLG.EXE' information.
+
+So, how do you get that information? In the DRAGITEM structure associated with
+an object being dragged is a field called ulItemID. That field is meant to
+contain application-specific information. If a WPS object initiates the drag,
+it places in ulItemID a pointer that is useful only to WPS objects. A normal PM
+program cannot not do anything with that pointer because the memory that it
+points to was allocated in the WPS process itself and it is not shared memory.
+A WPS program can use ulItemID to get all kinds of information about the object
+being dragged. If you've used containers, you know that a container record is
+represented by a MINIRECORDCORE structure. The ulItemID field contains a
+pointer to the MINIRECORDCORE structure of the Program Object within the folder
+(the folder is a container). The MINIRECORDCORE address in the ulItemID field
+is an address in memory that is right after some other information that is used
+by the WPS. One piece of information stored here is a 'SOMAny' pointer that is
+a pointer to a SOM object. To get that information from the ulItemID pointer, a
+macro is used called OBJECT_FROM_PREC. So you would do this:
+
+    SOMAny *somObject = OBJECT_FROM_PREC( pDragItem->ulItemID );
+
+This macro subtracts a value from ulItemID (effectively stepping backwards
+through memory) in order to obtain the SOMAny pointer. In other words, if the
+SOMAny pointer is right before the MINIRECORDCORE structure in memory (which I
+don't think it is), this is something like how the memory would look:
+
+     ADDRESS  Value
+
+     00000005 SOMAny pointer
+     00000008 PMINIRECORDCORE structure pointer  (ulItemID)
+
+The OBJECT_FROM_PREC macro would subtract 4 from ulItemID to get the SOMAny
+pointer. This is assuming it is directly before the PMINIRECORDCORE. I traced it
+at one time but I forget what the actual layout is.
+
+<In actuality, it differs slightly from this but I think you get the point>
+
+Anyway, once you get the SOMAny pointer, you have a pointer to the Program
+Object and you can use this to do all sorts of things, including getting
+information about the object.
+
+The way you know that ulItemID contains such a pointer is that the Rendering
+Mechanism used in the drag is DRM_OBJECT which is exclusively used by WPS
+objects. Since ulItemID is really an application-defined field, you obviously
+don't want to assume that every ulItemID that is dropped contains that value.
+
+So at this point, if I haven't totally confused you, you should be seeing why
+a regular PM program can't access the information. If it got the PDRAGITEM
+pointer and did an OBJECT_FROM_PREC( pDragItem->ulItemID ) and tried to do
+anything with the pointer returned, it would trap because that address is not
+in its address space.
+
+DRGPMWPS uses a mechanism to try and circumvent this. It creates a WPS 'agent'
+object which is a full-fledged, albeit simple, WPS object. That object lives
+in drgagent.dll. When DRGPMWPS.EXE comes up, it registers the DrgAgent class
+(which loads drgagent.dll) and creates an object of that class. This object will
+be an 'agent' for the normal PM window created by DRGPMWPS.EXE. Whenever the PM
+window needs information about an object being dropped on it, it will ask
+DrgAgent to help translate. All DRGPMWPS needs to pass DrgAgent is
+pDragItem->ulItemID. When DrgAgent gets a UM_DRAGINFO_REQUEST message with this
+ulItemID and the requesting window handle, it uses SOM/WPS methods to obtain
+the information, copies the information to a suballocated shared memory chunk
+and posts a UM_DRAGINFO message to the requesting window with that chunk.
+
+Of course getting the communication going between the PM window and the WPS
+object is not a simple task. This sample program uses a shared memory heap and
+window messages. DrgAgent creates an object window whose window handle is made
+available to the PM window via shared memory. When the PM window wants to pass
+data to the WPS object or vice-versa, a chunk of memory is allocated from a
+shared heap and its pointer is passed via a PM message to the other window.
+
+Here is the conversation that happens when a WPS object is being dragged and
+dropped on the PM window.
+
+    PM Window                                 WPS object (DrgAgent)
+    컴컴컴컴�                                 컴컴컴컴컴컴컴컴컴컴�
+
+ 1) DM_DRAGOVER (allow the drop)
+ 2) DM_DROP (send the UM_DRAGINFO_REQUEST)
+                                           3) UM_DRAGINFO_REQUEST
+                                                get the info
+                                                post the results to requestor
+                                                   with the UM_DRAGINFO message
+ 4) UM_DRAGINFO (contains the data)
+
+
+
+This sample program also attempts to show Drag/Drop working the other way (PM
+Window initiates the drag and an icon is dropped on a WPS object). If the WPS
+object is a WPProgram object, that WPProgram object's icon is changed to the
+one that was dropped on it. Kinda cute. It uses other WPS methods to accomplish
+this. Basically this is how it works:
+
+When the PM window initiates a drag, it has DrgAgent format the DRAGITEM
+structure so that it puts in ulItemID the MINIRECORDCORE pointer for the
+DrgAgent object. When WPProgram objects get a DM_DRAGOVER message, they see
+that the DRM_OBJECT Rendering Mechanism is being used and they use ulItemID to
+get the somObject pointer for DrgAgent and call DrgAgent's wpDraggedOverObject
+method. When the item is dropped on the object, it calls DrgAgent's
+wpDroppedOnObject method. Therefore, DrgAgent then has enough information about
+the dropped-on object (the dropped-on object's somObject pointer is passed to
+the method) to get an HOBJECT pointer which it passes to the PM window which
+does a WinSetObjectData to set the object's icon to the one that was dropped.
+
+Whew!
+
+There are problems if you try to drop onto a folder rather than a program. The
+WPFolder object doesn't do the wpDraggedOverObject and wpDroppedOnObject stuff
+so instead it copies the DrgAgent object into the folder. A better way to
+implement this would have been to do a WinReplaceObjectClass of the WPFolder
+class and override its wpDrop method, but alas this is just a sample program
+and that would have caused you to have to 'install' the replacement class - a
+little bit much for a sample program.
+
+The DRGPMWPS sample is both DRGPMWPS.EXE and DRGAGENT.DLL. There are 6 .c
+programs that comprise this sample:
+
+DRGPMWPS.C - base code that creates the PM container window.
+DRGAGENT.C - generated by the SOM emitter from DRGAGENT.CSC. Contains the
+             code for the overridden WPS methods used by the DrgAgent object
+             class.
+DRAG.C     - contains all Drag/Drop related code.
+COMMDATA.C - contains the code used to create and handle the shared memory that
+             contains the common variables between the PM window and the
+             DrgAgent object window.
+HEAP.C     - contains the code used to implement the shared heap used by both
+             the PM window and the DrgAgent object window.
+COMMWIN.C  - contains the code used to implement DrgAgent's object window.
+
+Note that this sample is a little lacking in comments. It would help to be a
+little familiar with SOM/WPS. If not, it may help you get into it a little. I
+basically ran out of time. This sammple was going to be very elaborate at one
+time...
+
+Hope this sample program helps someone.
+
+===============================================================================
+GLOBAL HISTORY
+
+8-02-93 - Completed coding.
+
+===============================================================================
+
+Rick Fishman
+Code Blazers, Inc.
+4113 Apricot
+Irvine, CA 92720
+
+CIS ID: 72251,750

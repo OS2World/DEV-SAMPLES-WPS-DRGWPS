@@ -1,0 +1,8 @@
+#define INCL_WIN
+#define INCL_WINWORKPLACE
+#include <os2.h>
+#include <wpobject.h>
+#include "drgagent.rh"
+
+ICON IID_DEFICON drgagent.ico
+

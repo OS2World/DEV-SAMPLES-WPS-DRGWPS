@@ -1,0 +1,6 @@
+NAME           DRGPMWPS      WINDOWAPI
+DESCRIPTION    'Drag/Drop sample program Copyright(R) Code Blazers, Inc. 1993'
+PROTMODE
+HEAPSIZE       16384
+STACKSIZE      58368
+
