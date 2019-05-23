@@ -7,7 +7,9 @@ LICENSE
 
 COMPILE TOOLS
 ===============
-* 
+* RC
+* ICC
+* SC
  
 AUTHORS
 ===============
